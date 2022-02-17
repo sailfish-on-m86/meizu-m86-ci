@@ -7,6 +7,10 @@ breakfast $DEVICE
 echo "clean .repo folder"
 rm -rf $ANDROID_ROOT/.repo
 
+cd $ANDROID_ROOT/device/$VENDOR/$DEVICE/pathes2
+sh apply.sh
+cd $ANDROID_ROOT
+
 # hack for droidmedia
 echo 'DROIDMEDIA_32 := true' >> external/droidmedia/env.mk
 echo 'FORCE_HAL:=1' >> external/droidmedia/env.mk
