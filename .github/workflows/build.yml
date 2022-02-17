@@ -1,0 +1,106 @@
+#=================================================
+# Description: Build Android HAL and dhd packages using GitHub Actions
+# Lisence: MIT
+# Author: 0312birdzhang
+#=================================================
+
+name: Build SailfishOS dhd
+
+on: 
+  release:
+    types: [published]
+  push:
+    branches: 
+      - master
+
+jobs:
+
+  build:
+    runs-on: ubuntu-16.04
+
+    env:
+      DEVICE: m86
+      VENDOR: meizu
+      ANDROID_ROOT: /home/runner/work/hadk_14.1/
+      SAILFISH_SKD_VERSION: 4.3.0.15
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@master
+    
+    - name: Initialization environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+        openjdk-8-jdk android-tools-adb bc \
+        bison build-essential curl flex g++-multilib \
+        gcc-multilib gnupg gperf imagemagick lib32ncurses5-dev \
+        lib32readline-dev lib32z1-dev libesd0-dev liblz4-tool \
+        libncurses5-dev libsdl1.2-dev libssl-dev libwxgtk3.0-dev \
+        libxml2 libxml2-utils lzop pngcrush rsync schedtool \
+        squashfs-tools xsltproc yasm zip zlib1g-dev git
+
+
+    - name: Download repo bin file
+      run: |
+        mkdir -p ~/bin
+        wget 'https://storage.googleapis.com/git-repo-downloads/repo' -P ~/bin
+        chmod +x ~/bin/repo
+        git config --global user.name "BirdZhang"
+        git config --global user.email "0312birdzhang@gmail.com"
+
+    - name: Downloading source code
+      run: |
+        source hadk.env
+        mkdir -p $ANDROID_ROOT
+        cd $ANDROID_ROOT
+        repo init -u git://github.com/mer-hybris/android.git -b hybris-14.1 --depth=1
+        mkdir -p .repo/local_manifests
+        wget https://github.com/meizu-m86/local_manifests/raw/cm-14.1/roomservice.xml -O .repo/local_manifests/m86.xml
+        repo sync -j8 -c --no-clone-bundle --no-tags
+    
+    - name: Clone device spec source
+      run: |
+        source hadk.env
+        rm -rf $ANDROID_ROOT/hybris/hybris-boot
+        git clone https://github.com/sailfish-on-m86/hybris-boot.git $ANDROID_ROOT/hybris/hybris-boot -b m86
+        # git clone --recurse-submodules https://github.com/Sailfish-On-Vince/droid-hal-vince.git $ANDROID_ROOT/rpm 
+        # git clone --recurse-submodules https://github.com/Sailfish-On-Vince/droid-config-vince.git $ANDROID_ROOT/hybris/droid-configs
+        # git clone --recurse-submodules https://github.com/Sailfish-On-Vince/droid-hal-version-vince.git $ANDROID_ROOT/hybris/droid-hal-version-vince
+        rm -rf $ANDROID_ROOT/external/droidmedia
+        git clone https://github.com/sailfishos/droidmedia.git $ANDROID_ROOT/external/droidmedia
+
+    - name: Build HAL
+      run: |
+        chmod +x build-hal.sh
+        bash build-hal.sh
+      shell: bash
+
+    - name: Build dhd in container
+      run: |
+        echo "clean more folders"
+        rm -rf $ANDROID_ROOT/prebuilts $ANDROID_ROOT/external/chromium* $ANDROID_ROOT/tools/external/gradle $ANDROID_ROOT/packages
+        rm -rf $ANDROID_ROOT/out/build-lineage_vince.ninja
+        chmod +x build-rpm.sh
+        sudo docker images|grep -v REPOSITORY|awk '{print $3}'|xargs docker rmi
+        sudo docker pull coderus/sailfishos-platform-sdk:$SAILFISH_SKD_VERSION
+        sudo docker run -v /home/runner/work:/home/nemo/work coderus/sailfishos-platform-sdk:$SAILFISH_SKD_VERSION /bin/sh /home/nemo/work/ci/ci/build-rpm.sh
+      shell: bash
+
+    - name: Check free disk
+      if: failure()
+      run: |
+        df -h
+      shell: bash
+
+    - name : Upload boot image
+      uses: actions/upload-artifact@master
+      with:
+        name: hybris-boot.img
+        path: ${{env.ANDROID_ROOT}}/out/target/product/${{env.DEVICE}}/hybris-boot.img
+
+    - name : Upload droid-local-repo
+      uses: actions/upload-artifact@master
+      with:
+        name: droid-local-repo
+        path: ${{env.ANDROID_ROOT}}/droid-local-repo
